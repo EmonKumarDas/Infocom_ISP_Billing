@@ -1,0 +1,25 @@
+{
+  "name": "infocom_billing_software",
+  "version": "2.0.0",
+  "description": "ISP Billing Manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^7.5.0",
+    "express-session": "^1.19.0",
+    "helmet": "^8.1.0",
+    "node-cron": "^4.2.1",
+    "node-routeros": "^1.6.8",
+    "sqlite3": "^5.1.7"
+  }
+}
