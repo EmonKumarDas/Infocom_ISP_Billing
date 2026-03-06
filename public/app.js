@@ -61,8 +61,10 @@ $('mobile-toggle').addEventListener('click', toggleSidebar);
 function showSection(name) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active-section'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    $('sec-' + name).classList.add('active-section');
-    $('nav-' + name).classList.add('active');
+    const sec = $('sec-' + name);
+    const nav = $('nav-' + name);
+    if (sec) sec.classList.add('active-section');
+    if (nav) nav.classList.add('active');
     const titles = { dashboard: 'Dashboard', clients: 'PPPoE Clients', routers: 'MikroTik Routers', 'system-users': 'System Users' };
     $('page-title').textContent = titles[name] || 'Dashboard';
     if (name === 'routers') loadRoutersList();
@@ -507,8 +509,9 @@ async function loadRoutersList() {
         const res = await fetch('/api/routers', { credentials: 'include' });
         const list = await res.json();
         const c = $('routers-list');
+        const isAdmin = currentUser && currentUser.role === 'admin';
         if (list.length === 0) {
-            c.innerHTML = '<div class="col-span-full text-center text-gray-500 py-12">No routers configured. Add one to get started.</div>';
+            c.innerHTML = '<div class="col-span-full text-center text-gray-500 py-12">No routers configured.' + (isAdmin ? ' Add one to get started.' : '') + '</div>';
             return;
         }
         c.innerHTML = list.map(r => `
@@ -520,10 +523,10 @@ async function loadRoutersList() {
                 <p class="text-sm text-gray-400 mb-1"><span class="text-gray-500">Host:</span> ${r.host}</p>
                 <p class="text-sm text-gray-400 mb-1"><span class="text-gray-500">User:</span> ${r.username}</p>
                 <p class="text-sm text-gray-400 mb-3"><span class="text-gray-500">Port:</span> ${r.api_port}</p>
-                <div class="flex gap-2 mt-auto">
+                ${isAdmin ? `<div class="flex gap-2 mt-auto">
                     <button onclick='openRouterModal(${JSON.stringify(r)})' class="flex-1 text-xs px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors">Edit</button>
                     <button onclick="deleteRouter(${r.id})" class="flex-1 text-xs px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors">Delete</button>
-                </div>
+                </div>` : ''}
             </div>
         `).join('');
     } catch (e) { console.error(e); }
@@ -581,17 +584,31 @@ async function deleteRouter(id) {
 async function loadSystemUsers() {
     try {
         const res = await fetch('/api/system-users', { credentials: 'include' });
+        if (!res.ok) {
+            const tb = $('sys-users-body');
+            tb.innerHTML = '<tr><td colspan="3" class="px-5 py-10 text-center text-gray-500 text-sm">Unable to load system users</td></tr>';
+            return;
+        }
         const list = await res.json();
         const tb = $('sys-users-body');
+        const isAdmin = currentUser && currentUser.role === 'admin';
         if (list.length === 0) {
             tb.innerHTML = '<tr><td colspan="3" class="px-5 py-10 text-center text-gray-500 text-sm">No users</td></tr>';
             return;
         }
-        tb.innerHTML = list.map(u => `<tr class="border-b border-gray-800/40 hover:bg-gray-800/30 transition-colors">
-            <td class="px-5 py-3 text-sm font-medium">${u.username}</td>
-            <td class="px-5 py-3"><span class="text-xs px-2 py-0.5 rounded-full ${u.role === 'admin' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-brand-500/10 text-brand-400 border border-brand-500/20'} font-medium">${u.role}</span></td>
-            <td class="px-5 py-3 text-right">${u.id !== currentUser.id ? `<button onclick="deleteSysUser(${u.id})" class="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 rounded-lg transition-colors">Delete</button>` : '<span class="text-xs text-gray-600">You</span>'}</td>
-        </tr>`).join('');
+        tb.innerHTML = list.map(u => {
+            let actionCell = '<span class="text-xs text-gray-600">—</span>';
+            if (isAdmin) {
+                actionCell = u.id !== currentUser.id
+                    ? `<button onclick="deleteSysUser(${u.id})" class="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 rounded-lg transition-colors">Delete</button>`
+                    : '<span class="text-xs text-gray-600">You</span>';
+            }
+            return `<tr class="border-b border-gray-800/40 hover:bg-gray-800/30 transition-colors">
+                <td class="px-5 py-3 text-sm font-medium">${u.username}</td>
+                <td class="px-5 py-3"><span class="text-xs px-2 py-0.5 rounded-full ${u.role === 'admin' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-brand-500/10 text-brand-400 border border-brand-500/20'} font-medium">${u.role}</span></td>
+                <td class="px-5 py-3 text-right">${actionCell}</td>
+            </tr>`;
+        }).join('');
     } catch (e) { console.error(e); }
 }
 

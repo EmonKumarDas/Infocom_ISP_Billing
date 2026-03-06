@@ -45,6 +45,7 @@ app.use(helmet({
         directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com", "https://fonts.googleapis.com"],
+            scriptSrcAttr: ["'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.tailwindcss.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
             imgSrc: ["'self'", "data:"],
@@ -79,7 +80,7 @@ const loginLimiter = rateLimit({
     legacyHeaders: false
 });
 
-// --- DATABASE SETUP ---
+// --- DATABASE SETUP WITH AUTO-MIGRATION ---
 const dbPath = path.resolve(__dirname, 'billing.db');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) return console.error('SQLite Error:', err.message);
@@ -88,6 +89,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
     db.run('PRAGMA foreign_keys = ON');
 
     db.serialize(() => {
+        // --- Create tables if they don't exist ---
         db.run(`CREATE TABLE IF NOT EXISTS dashboard_users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
@@ -108,18 +110,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
             router_id INTEGER NOT NULL,
-            full_name TEXT DEFAULT '',
-            phone TEXT DEFAULT '',
-            location TEXT DEFAULT '',
-            user_id TEXT DEFAULT '',
-            bw_type TEXT DEFAULT 'shared',
-            total_bw TEXT DEFAULT '',
-            email TEXT DEFAULT '',
-            handover_date TEXT,
-            payment_date TEXT,
             expiry_date TEXT,
             monthly_price REAL DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')),
             UNIQUE(username, router_id),
             FOREIGN KEY (router_id) REFERENCES mikrotiks(id) ON DELETE CASCADE
         )`);
@@ -135,6 +127,40 @@ const db = new sqlite3.Database(dbPath, (err) => {
             created_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (user_db_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
+        // --- Auto-migrate: add missing columns to 'users' table ---
+        const requiredColumns = [
+            { name: 'full_name', sql: "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''" },
+            { name: 'phone', sql: "ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''" },
+            { name: 'location', sql: "ALTER TABLE users ADD COLUMN location TEXT DEFAULT ''" },
+            { name: 'user_id', sql: "ALTER TABLE users ADD COLUMN user_id TEXT DEFAULT ''" },
+            { name: 'bw_type', sql: "ALTER TABLE users ADD COLUMN bw_type TEXT DEFAULT 'shared'" },
+            { name: 'total_bw', sql: "ALTER TABLE users ADD COLUMN total_bw TEXT DEFAULT ''" },
+            { name: 'email', sql: "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''" },
+            { name: 'handover_date', sql: "ALTER TABLE users ADD COLUMN handover_date TEXT" },
+            { name: 'payment_date', sql: "ALTER TABLE users ADD COLUMN payment_date TEXT" },
+            { name: 'created_at', sql: "ALTER TABLE users ADD COLUMN created_at TEXT DEFAULT (datetime('now'))" },
+        ];
+
+        db.all(`PRAGMA table_info(users)`, [], (err, columns) => {
+            if (err) { console.error('Migration check error:', err.message); return; }
+            const existingCols = (columns || []).map(c => c.name);
+            let migrated = 0;
+            for (const col of requiredColumns) {
+                if (!existingCols.includes(col.name)) {
+                    db.run(col.sql, (err) => {
+                        if (err) console.error(`  ❌ Migration failed for ${col.name}:`, err.message);
+                        else console.log(`  ✅ Added column: users.${col.name}`);
+                    });
+                    migrated++;
+                }
+            }
+            if (migrated === 0) {
+                console.log('✅ Database schema is up to date.');
+            } else {
+                console.log(`🔄 Applied ${migrated} migration(s) to 'users' table.`);
+            }
+        });
 
         // Seed default admin
         db.get(`SELECT COUNT(*) as count FROM dashboard_users`, [], (err, row) => {
@@ -238,7 +264,7 @@ app.get('/api/me', requireAuth, (req, res) => {
 // SYSTEM USERS API (Admin only)
 // =============================================
 
-app.get('/api/system-users', requireAdmin, async (req, res) => {
+app.get('/api/system-users', requireAuth, async (req, res) => {
     try {
         const users = await dbAll(`SELECT id, username, role FROM dashboard_users`);
         res.json(users);
