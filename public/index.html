@@ -174,6 +174,14 @@
                 </svg>
                 <span>System Users</span>
             </button>
+            <button onclick="showSection('access-control')" id="nav-access-control"
+                class="admin-only hidden nav-item w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
+                </svg>
+                <span>Access Control</span>
+            </button>
         </nav>
         <div class="px-4 py-4 border-t border-gray-800">
             <div class="flex items-center justify-between">
@@ -353,6 +361,43 @@
                         <tbody id="sys-users-body">
                             <tr>
                                 <td colspan="3" class="px-5 py-10 text-center text-gray-500 text-sm">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ============ ACCESS CONTROL SECTION ============ -->
+            <div id="sec-access-control" class="section fade-in">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h3 class="text-lg font-semibold">IP Whitelist</h3>
+                        <p class="text-sm text-gray-400 mt-1">Restrict application access to specific IP addresses.
+                            (Localhost 127.0.0.1 is always allowed)</p>
+                    </div>
+                    <button onclick="openIpModal()"
+                        class="admin-only hidden px-4 py-2 text-sm font-medium text-white rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 shadow-lg shadow-brand-500/20 transition-all flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <span>Add IP Address</span>
+                    </button>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr
+                                class="bg-gray-800/80 border-b border-gray-700 text-xs uppercase tracking-wider text-gray-400 font-semibold">
+                                <th class="px-5 py-3">IP Address</th>
+                                <th class="px-5 py-3">Description</th>
+                                <th class="px-5 py-3">Added Date</th>
+                                <th class="px-5 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ip-table-body">
+                            <tr>
+                                <td colspan="4" class="px-5 py-10 text-center text-gray-500 text-sm">Loading...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -688,6 +733,33 @@
                             class="flex-1 px-4 py-2.5 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm">Cancel</button>
                         <button type="submit"
                             class="flex-1 px-4 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium">Create</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add IP Modal -->
+    <div id="modal-ip" class="fixed inset-0 z-40 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal('modal-ip')"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4">
+            <div class="glass w-full max-w-md rounded-2xl p-6 relative">
+                <h3 class="text-lg font-bold mb-5">Whitelist IP Address</h3>
+                <form id="form-ip" class="space-y-4">
+                    <div><label class="block text-xs font-medium text-gray-400 mb-1">IP Address</label>
+                        <input type="text" id="ip-addr" required placeholder="e.g. 192.168.1.100"
+                            class="w-full px-3 py-2.5 bg-gray-800/60 border border-gray-700 rounded-lg text-white text-sm focus:ring-brand-500 focus:border-brand-500 focus:outline-none">
+                    </div>
+                    <div><label class="block text-xs font-medium text-gray-400 mb-1">Description</label>
+                        <input type="text" id="ip-desc" placeholder="e.g. Office PC"
+                            class="w-full px-3 py-2.5 bg-gray-800/60 border border-gray-700 rounded-lg text-white text-sm focus:ring-brand-500 focus:border-brand-500 focus:outline-none">
+                    </div>
+                    <div class="flex gap-3 pt-2">
+                        <button type="button" onclick="closeModal('modal-ip')"
+                            class="flex-1 px-4 py-2.5 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700 text-sm">Cancel</button>
+                        <button type="submit"
+                            class="flex-1 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium">Allow
+                            IP</button>
                     </div>
                 </form>
             </div>

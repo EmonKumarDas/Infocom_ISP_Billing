@@ -40,18 +40,14 @@ function decrypt(text) {
 }
 
 // --- MIDDLEWARE ---
+app.use((req, res, next) => {
+    const rawIp = req.socket.remoteAddress || 'unknown';
+    console.log(`--> [GLOBAL INBOUND] ${req.method} ${req.url} from IP: ${rawIp}`);
+    next();
+});
+
 app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com", "https://fonts.googleapis.com"],
-            scriptSrcAttr: ["'unsafe-inline'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.tailwindcss.com"],
-            fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:"],
-            connectSrc: ["'self'"],
-        }
-    },
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
 }));
 app.use(cors({ origin: true, credentials: true }));
@@ -64,12 +60,10 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        sameSite: 'strict',
+        sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000
     }
 }));
-
-app.use(express.static(path.join(__dirname, 'public')));
 
 // Rate limit for login
 const loginLimiter = rateLimit({
@@ -79,6 +73,21 @@ const loginLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false
 });
+
+// Helper: promisify db methods
+const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows));
+});
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+});
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) { err ? reject(err) : resolve(this); });
+});
+
+// --- STATIC FILES ---
+app.use(express.static(path.join(__dirname, 'public')));
+
 
 // --- DATABASE SETUP WITH AUTO-MIGRATION ---
 const dbPath = path.resolve(__dirname, 'billing.db');
@@ -128,6 +137,13 @@ const db = new sqlite3.Database(dbPath, (err) => {
             FOREIGN KEY (user_db_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
 
+        db.run(`CREATE TABLE IF NOT EXISTS allowed_ips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip_address TEXT UNIQUE NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        )`);
+
         // --- Auto-migrate: add missing columns to 'users' table ---
         const requiredColumns = [
             { name: 'full_name', sql: "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''" },
@@ -175,16 +191,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
     });
 });
 
-// Helper: promisify db methods
-const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows));
-});
-const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
-});
-const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) { err ? reject(err) : resolve(this); });
-});
+// Helper: promisify db methods exported above
 
 // --- AUTH MIDDLEWARE ---
 function requireAuth(req, res, next) {
@@ -203,6 +210,52 @@ function requireAdmin(req, res, next) {
     }
     next();
 }
+
+// --- IP ALLOW_LIST MIDDLEWARE (APPLIED BEFORE PROTECTED ROUTES ONLY) ---
+// Helper: check if an IP is a private/local network address (RFC 1918)
+function isPrivateIp(ip) {
+    // 10.0.0.0 – 10.255.255.255
+    if (/^10\./.test(ip)) return true;
+    // 172.0.0.0 – 172.31.255.255 (includes both standard RFC 1918 and common local ranges)
+    const match172 = ip.match(/^172\.(\d+)\./);
+    if (match172 && parseInt(match172[1]) >= 0 && parseInt(match172[1]) <= 31) return true;
+    // 192.168.0.0 – 192.168.255.255
+    if (/^192\.168\./.test(ip)) return true;
+    // 169.254.0.0 – 169.254.255.255 (link-local)
+    if (/^169\.254\./.test(ip)) return true;
+    return false;
+}
+
+async function ipWhitelistMiddleware(req, res, next) {
+    try {
+        // Exempt login/auth routes so admins can log in from anywhere to whitelist themselves
+        if (req.path === '/api/login' || req.path === '/api/logout' || req.path === '/api/me') {
+            return next();
+        }
+
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        if (!clientIp) return next();
+        const normalizedIp = clientIp === '::1' || clientIp === '::ffff:127.0.0.1' ? '127.0.0.1' : clientIp.replace(/^::ffff:/, '');
+
+        console.log(`[IP DEBUG] Incoming Request to ${req.path} from Raw IP: ${clientIp} | Normalized IP: ${normalizedIp}`);
+
+        // Always allow localhost
+        if (normalizedIp === '127.0.0.1') return next();
+
+        // Always allow private/local network IPs (same LAN devices)
+        if (isPrivateIp(normalizedIp)) return next();
+
+        // Check DB for whitelist (for public/external IPs)
+        const allowed = await dbGet(`SELECT * FROM allowed_ips WHERE ip_address = ?`, [normalizedIp]);
+        if (allowed) return next();
+
+        return res.status(403).json({ error: `Forbidden: IP ${normalizedIp} is not whitelisted by Administrator.` });
+    } catch (err) {
+        next();
+    }
+}
+// Apply it to all API routes
+app.use('/api', ipWhitelistMiddleware);
 
 // --- MIKROTIK CONNECTION HELPER ---
 async function getMTClient(routerId) {
@@ -293,6 +346,40 @@ app.delete('/api/system-users/:id', requireAdmin, async (req, res) => {
         const id = parseInt(req.params.id);
         if (req.session.user.id === id) return res.status(400).json({ error: 'Cannot delete yourself' });
         await dbRun(`DELETE FROM dashboard_users WHERE id = ?`, [id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// =============================================
+// ALLOWED IPs API (Admin only)
+// =============================================
+
+app.get('/api/allowed-ips', requireAuth, async (req, res) => {
+    try {
+        const ips = await dbAll(`SELECT * FROM allowed_ips ORDER BY created_at DESC`);
+        res.json(ips);
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/allowed-ips', requireAdmin, async (req, res) => {
+    try {
+        const { ip_address, description } = req.body;
+        if (!ip_address) return res.status(400).json({ error: 'IP address required' });
+        await dbRun(`INSERT INTO allowed_ips (ip_address, description) VALUES (?, ?)`, [ip_address, description || '']);
+        res.json({ success: true });
+    } catch (err) {
+        if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'IP already whitelisted' });
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.delete('/api/allowed-ips/:id', requireAdmin, async (req, res) => {
+    try {
+        await dbRun(`DELETE FROM allowed_ips WHERE id = ?`, [parseInt(req.params.id)]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
@@ -784,4 +871,16 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(port, () => console.log(`🚀 Server running at http://localhost:${port}`));
+app.listen(port, '0.0.0.0', () => {
+    const os = require('os');
+    const nets = os.networkInterfaces();
+    console.log(`🚀 Server running locally at http://localhost:${port}`);
+    console.log(`🌍 Server bound to 0.0.0.0 — accessible on ALL network interfaces:`);
+    for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+            if (net.family === 'IPv4' && !net.internal) {
+                console.log(`   - [${name}] http://${net.address}:${port}`);
+            }
+        }
+    }
+});

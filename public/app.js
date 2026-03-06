@@ -65,10 +65,11 @@ function showSection(name) {
     const nav = $('nav-' + name);
     if (sec) sec.classList.add('active-section');
     if (nav) nav.classList.add('active');
-    const titles = { dashboard: 'Dashboard', clients: 'PPPoE Clients', routers: 'MikroTik Routers', 'system-users': 'System Users' };
+    const titles = { dashboard: 'Dashboard', clients: 'PPPoE Clients', routers: 'MikroTik Routers', 'system-users': 'System Users', 'access-control': 'Access Control' };
     $('page-title').textContent = titles[name] || 'Dashboard';
     if (name === 'routers') loadRoutersList();
     if (name === 'system-users') loadSystemUsers();
+    if (name === 'access-control') loadAllowedIps();
     if (name === 'clients' && selectedRouterId) fetchPPPoEUsers();
     if (window.innerWidth < 1024) toggleSidebar();
 }
@@ -638,6 +639,68 @@ async function deleteSysUser(id) {
         if (d.error) throw new Error(d.error);
         showToast('User deleted');
         loadSystemUsers();
+    } catch (e) { showToast(e.message, 'error'); }
+    finally { hideLoading(); }
+}
+
+// ============ ACCESS CONTROL (IP Whitelist) ============
+async function loadAllowedIps() {
+    try {
+        const res = await fetch('/api/allowed-ips', { credentials: 'include' });
+        if (!res.ok) {
+            $('ip-table-body').innerHTML = '<tr><td colspan="4" class="px-5 py-10 text-center text-red-400 text-sm">Failed to load IPs</td></tr>';
+            return;
+        }
+        const list = await res.json();
+        const tb = $('ip-table-body');
+        if (list.length === 0) {
+            tb.innerHTML = '<tr><td colspan="4" class="px-5 py-10 text-center text-gray-500 text-sm">No IP addresses whitelisted. Only localhost can access the application.</td></tr>';
+            return;
+        }
+        tb.innerHTML = list.map(ip => `
+            <tr class="border-b border-gray-800/40 hover:bg-gray-800/30 transition-colors">
+                <td class="px-5 py-3 text-sm font-mono text-emerald-400">${ip.ip_address}</td>
+                <td class="px-5 py-3 text-sm text-gray-300">${ip.description || '<span class="text-gray-600">—</span>'}</td>
+                <td class="px-5 py-3 text-xs text-gray-400">${new Date(ip.created_at).toLocaleDateString()}</td>
+                <td class="px-5 py-3 text-right">
+                    <button onclick="deleteAllowedIp(${ip.id}, '${ip.ip_address}')" class="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1 rounded-lg transition-colors">Revoke Access</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) { console.error(e); }
+}
+
+function openIpModal() {
+    $('form-ip').reset();
+    openModal('modal-ip');
+}
+
+$('form-ip')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    showLoading();
+    try {
+        const res = await fetch('/api/allowed-ips', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({ ip_address: $('ip-addr').value, description: $('ip-desc').value })
+        });
+        const d = await res.json();
+        if (d.error) throw new Error(d.error);
+        showToast('IP Address whitelisted');
+        closeModal('modal-ip');
+        loadAllowedIps();
+    } catch (e) { showToast(e.message, 'error'); }
+    finally { hideLoading(); }
+});
+
+async function deleteAllowedIp(id, ip) {
+    if (!confirm(`Revoke access for IP ${ip}? They will be immediately blocked.`)) return;
+    showLoading();
+    try {
+        const res = await fetch(`/api/allowed-ips/${id}`, { method: 'DELETE', credentials: 'include' });
+        const d = await res.json();
+        if (d.error) throw new Error(d.error);
+        showToast('IP access revoked');
+        loadAllowedIps();
     } catch (e) { showToast(e.message, 'error'); }
     finally { hideLoading(); }
 }
